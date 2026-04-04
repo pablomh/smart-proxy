@@ -3,6 +3,7 @@ source 'https://rubygems.org'
 gemspec
 
 gem 'concurrent-ruby', '~> 1.0', require: 'concurrent'
+gem 'redis', require: false # optional: shared script cache for LB capsule deployments
 
 Dir[File.join(__dir__, 'bundler.d', '*.rb')].each do |bundle|
   eval_gemfile(bundle)

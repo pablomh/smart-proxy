@@ -1,3 +1,9 @@
 ---
 :enabled: false
 # :registration_url: https://loadbalancer.example.com
+
+# Optional: shared Redis cache for the registration script, useful when
+# multiple capsule nodes sit behind a load balancer. One warm request
+# on any node benefits all nodes. Falls back to per-node in-memory cache
+# if unset or if Redis is unreachable. Requires the 'redis' gem.
+# :redis_url: redis://localhost:6379/0

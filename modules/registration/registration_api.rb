@@ -40,6 +40,24 @@ class Proxy::Registration::Api < ::Sinatra::Base
     def evict_key_mutex(cache_key)
       KEY_MUTEXES.delete(cache_key)
     end
+
+    # Returns a Redis client when :redis_url is configured, nil otherwise.
+    # Lazy-initialised; falls back to nil on LoadError (gem not installed)
+    # or connection error, so in-memory cache remains the fallback.
+    def redis_client
+      return @redis_client if instance_variable_defined?(:@redis_client)
+
+      redis_url = Proxy::Registration::Plugin.settings.redis_url
+      @redis_client = if redis_url
+                        require 'redis'
+                        Redis.new(url: redis_url)
+                      end
+    rescue LoadError
+      @redis_client = nil
+    rescue => e
+      ::Proxy::Log.logger.warn "Registration: Redis init failed (#{e.class}: #{e.message}); using local cache"
+      @redis_client = nil
+    end
   end
 
   get '/health' do
@@ -96,6 +114,17 @@ class Proxy::Registration::Api < ::Sinatra::Base
       return value if value
 
       result = yield
+
+      # Write to Redis first (shared across all capsule nodes in the LB pool)
+      if (redis = self.class.redis_client)
+        begin
+          redis.setex(key, REGISTRATION_SCRIPT_CACHE_TTL, result)
+        rescue => e
+          logger.warn "registration_script Redis write failed: #{e.message}"
+        end
+      end
+
+      # Always write to local in-memory cache (fallback and fast path)
       self.class.registration_script_cache[key] = { body: result, at: Time.now }
       self.class.evict_key_mutex(key)
       result
@@ -103,9 +132,26 @@ class Proxy::Registration::Api < ::Sinatra::Base
   end
 
   def read_registration_cache(cache_key)
+    # Check Redis first — a hit here means another node already fetched the
+    # script, so we serve it without going to Foreman and also warm the
+    # local cache for subsequent requests to this node.
+    if (redis = self.class.redis_client)
+      begin
+        cached = redis.get(cache_key)
+        if cached
+          logger.debug "registration_script cache=HIT source=redis key_prefix=#{cache_key[0, 40]}"
+          self.class.registration_script_cache[cache_key] = { body: cached, at: Time.now }
+          return cached
+        end
+      rescue => e
+        logger.warn "registration_script Redis read failed, falling back to local cache: #{e.message}"
+      end
+    end
+
+    # Fall back to per-node in-memory cache
     entry = self.class.registration_script_cache[cache_key]
     if entry && (Time.now - entry[:at]) < REGISTRATION_SCRIPT_CACHE_TTL
-      logger.debug "registration_script cache=HIT age=#{(Time.now - entry[:at]).to_i}s key_prefix=#{cache_key[0, 40]}"
+      logger.debug "registration_script cache=HIT source=local age=#{(Time.now - entry[:at]).to_i}s key_prefix=#{cache_key[0, 40]}"
       entry[:body]
     else
       logger.debug "registration_script cache=MISS key_prefix=#{cache_key[0, 40]}"
