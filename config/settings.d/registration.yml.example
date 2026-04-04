@@ -7,3 +7,11 @@
 # on any node benefits all nodes. Falls back to per-node in-memory cache
 # if unset or if Redis is unreachable. Requires the 'redis' gem.
 # :cache_url: redis://localhost:6379/0
+
+# Optional: maximum number of concurrent POST /register requests forwarded to
+# Foreman. When all permits are taken the capsule returns 503 + Retry-After:30
+# immediately. The orchestration layer (Ansible retry_failed, wave batching)
+# handles rescheduling — no in-capsule wait queue is used.
+# Default: unset (unlimited). Size this relative to Foreman's Rails thread pool
+# and database connection pool (typically 5-20 threads/connections).
+# :max_concurrent_registrations: 50

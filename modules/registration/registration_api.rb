@@ -44,6 +44,16 @@ class Proxy::Registration::Api < ::Sinatra::Base
     # Returns a Redis client when :cache_url is configured, nil otherwise.
     # Lazy-initialised; falls back to nil on LoadError (gem not installed)
     # or connection error, so in-memory cache remains the fallback.
+    # Returns a Concurrent::Semaphore when :max_concurrent_registrations is set,
+    # nil otherwise (unlimited). Lazy-initialised; the semaphore persists for
+    # the lifetime of the process so the permit count is shared across requests.
+    def registration_semaphore
+      return @registration_semaphore if instance_variable_defined?(:@registration_semaphore)
+
+      limit = Proxy::Registration::Plugin.settings.max_concurrent_registrations
+      @registration_semaphore = limit ? Concurrent::Semaphore.new(limit.to_i) : nil
+    end
+
     def registration_cache_client
       return @registration_cache_client if instance_variable_defined?(:@registration_cache_client)
 
@@ -85,14 +95,37 @@ class Proxy::Registration::Api < ::Sinatra::Base
   end
 
   post '/' do
-    response = Proxy::Registration::ProxyRequest.new.host_register(request)
-    handle_response(response)
+    with_concurrency_limit do
+      resp = Proxy::Registration::ProxyRequest.new.host_register(request)
+      handle_response(resp)
+    end
   rescue StandardError => e
     logger.exception "Error when rendering Host Registration Template", e
     render_error(default_error_msg)
   end
 
   private
+
+  # Runs the block only if a concurrency permit is available.
+  # Returns the block's value on success.
+  # Halts with 503 + Retry-After without yielding when all permits are taken.
+  #
+  # NOTE: do not call Sinatra's `halt` inside the block — `halt` raises
+  # Sinatra::HaltResponse which bypasses `ensure`, leaking a permit.
+  # Use `status` + explicit `return` instead.
+  def with_concurrency_limit
+    semaphore = self.class.registration_semaphore
+    if semaphore && !semaphore.try_acquire
+      logger.warn "registration_concurrency limit=#{semaphore.count} status=rejected"
+      response.headers['Retry-After'] = '30'
+      halt 503, "echo \"Registration queue full, please retry later\"\nexit 1\n"
+    end
+    begin
+      yield
+    ensure
+      semaphore&.release
+    end
+  end
 
   def registration_script
     cache_key = Rack::Utils.build_query(

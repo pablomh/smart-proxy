@@ -20,5 +20,13 @@ module Proxy::Registration
     # Redis is unreachable. Requires the 'redis' gem to be installed.
     # Example: redis://lb-host:6379/0
     validate :cache_url, optional_url: true
+
+    # Optional limit on simultaneous POST /register requests forwarded to
+    # Foreman. When all permits are taken, the capsule immediately returns
+    # 503 with Retry-After: 30 so the client can back off. The orchestration
+    # layer (Ansible retry_failed, satperf wave batching) handles rescheduling.
+    # Default: unset (unlimited). Tune based on Foreman's Rails thread pool
+    # and database connection pool size.
+    # Example: 50 (permits ~50 concurrent host record creations)
   end
 end
