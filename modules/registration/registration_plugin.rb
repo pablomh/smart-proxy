@@ -19,6 +19,6 @@ module Proxy::Registration
     # every node. Falls back to per-node in-memory cache if unset or if
     # Redis is unreachable. Requires the 'redis' gem to be installed.
     # Example: redis://lb-host:6379/0
-    validate :redis_url, optional_url: true
+    validate :cache_url, optional_url: true
   end
 end

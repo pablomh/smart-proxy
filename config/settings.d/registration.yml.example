@@ -6,4 +6,4 @@
 # multiple capsule nodes sit behind a load balancer. One warm request
 # on any node benefits all nodes. Falls back to per-node in-memory cache
 # if unset or if Redis is unreachable. Requires the 'redis' gem.
-# :redis_url: redis://localhost:6379/0
+# :cache_url: redis://localhost:6379/0

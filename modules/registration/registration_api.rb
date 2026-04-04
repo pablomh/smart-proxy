@@ -41,22 +41,22 @@ class Proxy::Registration::Api < ::Sinatra::Base
       KEY_MUTEXES.delete(cache_key)
     end
 
-    # Returns a Redis client when :redis_url is configured, nil otherwise.
+    # Returns a Redis client when :cache_url is configured, nil otherwise.
     # Lazy-initialised; falls back to nil on LoadError (gem not installed)
     # or connection error, so in-memory cache remains the fallback.
-    def redis_client
-      return @redis_client if instance_variable_defined?(:@redis_client)
+    def registration_cache_client
+      return @registration_cache_client if instance_variable_defined?(:@registration_cache_client)
 
-      redis_url = Proxy::Registration::Plugin.settings.redis_url
-      @redis_client = if redis_url
+      cache_url = Proxy::Registration::Plugin.settings.cache_url
+      @registration_cache_client = if cache_url
                         require 'redis'
-                        Redis.new(url: redis_url)
+                        Redis.new(url: cache_url)
                       end
     rescue LoadError
-      @redis_client = nil
+      @registration_cache_client = nil
     rescue => e
       ::Proxy::Log.logger.warn "Registration: Redis init failed (#{e.class}: #{e.message}); using local cache"
-      @redis_client = nil
+      @registration_cache_client = nil
     end
   end
 
@@ -116,7 +116,7 @@ class Proxy::Registration::Api < ::Sinatra::Base
       result = yield
 
       # Write to Redis first (shared across all capsule nodes in the LB pool)
-      if (redis = self.class.redis_client)
+      if (redis = self.class.registration_cache_client)
         begin
           redis.setex(key, REGISTRATION_SCRIPT_CACHE_TTL, result)
         rescue => e
@@ -135,11 +135,11 @@ class Proxy::Registration::Api < ::Sinatra::Base
     # Check Redis first — a hit here means another node already fetched the
     # script, so we serve it without going to Foreman and also warm the
     # local cache for subsequent requests to this node.
-    if (redis = self.class.redis_client)
+    if (redis = self.class.registration_cache_client)
       begin
         cached = redis.get(cache_key)
         if cached
-          logger.debug "registration_script cache=HIT source=redis key_prefix=#{cache_key[0, 40]}"
+          logger.debug "registration_script cache=HIT source=shared key_prefix=#{cache_key[0, 40]}"
           self.class.registration_script_cache[cache_key] = { body: cached, at: Time.now }
           return cached
         end
