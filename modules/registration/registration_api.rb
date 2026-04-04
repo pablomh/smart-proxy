@@ -89,7 +89,13 @@ class Proxy::Registration::Api < ::Sinatra::Base
 
   def read_registration_cache(cache_key)
     entry = self.class.registration_script_cache[cache_key]
-    entry[:body] if entry && (Time.now - entry[:at]) < REGISTRATION_SCRIPT_CACHE_TTL
+    if entry && (Time.now - entry[:at]) < REGISTRATION_SCRIPT_CACHE_TTL
+      logger.debug "registration_script cache=HIT age=#{(Time.now - entry[:at]).to_i}s key_prefix=#{cache_key[0, 40]}"
+      entry[:body]
+    else
+      logger.debug "registration_script cache=MISS key_prefix=#{cache_key[0, 40]}"
+      nil
+    end
   end
 
   def handle_response(response)
