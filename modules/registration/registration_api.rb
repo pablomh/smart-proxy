@@ -42,6 +42,21 @@ class Proxy::Registration::Api < ::Sinatra::Base
     end
   end
 
+  get '/health' do
+    content_type :json
+    if Proxy::Registration::ProxyRequest.new.foreman_reachable?
+      { status: 'ok' }.to_json
+    else
+      status 503
+      { status: 'error', message: 'Foreman is unreachable' }.to_json
+    end
+  rescue StandardError => e
+    logger.exception 'Error during health check', e
+    status 503
+    content_type :json
+    { status: 'error', message: 'Health check failed' }.to_json
+  end
+
   get '/' do
     registration_script
   rescue ScriptFetchError => e

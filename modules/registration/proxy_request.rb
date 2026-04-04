@@ -33,6 +33,15 @@ module Proxy::Registration
       send_request(proxy_req)
     end
 
+    def foreman_reachable?
+      proxy_req = request_factory.create_get '/api/status', {}, {}
+      send_request(proxy_req)
+      true
+    rescue => e
+      logger.debug "Foreman reachability check failed: #{e.class}: #{e.message}"
+      false
+    end
+
     private
 
     def request_params(request)
