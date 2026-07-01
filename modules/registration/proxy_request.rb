@@ -7,30 +7,41 @@ module Proxy::Registration
                                              request_params(request),
                                              headers(request)
 
-      send_request(proxy_req)
+      send_request_direct(proxy_req)
     end
 
-    # we support two way of sending data - either a JSON or url encoded data
+    # Retries once on transport errors. Foreman's POST /register uses
+    # find_or_initialize_by for the host record, making a single replay
+    # safe after a stale keep-alive connection failure.
+    REGISTER_RETRY_EXCEPTIONS = [
+      EOFError,
+      Errno::ECONNRESET,
+      Errno::EPIPE,
+      IOError,
+      OpenSSL::SSL::SSLError,
+    ].freeze
+
     def host_register(request)
+      body = request.body.read
+      hdrs = headers(request)
+
       if request.content_type == 'application/x-www-form-urlencoded'
-        # the request has a different content type, ForemanRequestFactory sets content type to json, unless
-        # specified explicitly
-        # also request.params contain the same data that is in request.body, just parsed to hash,
-        # in case they are nested (e.g. host hash) we need this causes problem during CGI escaping
-        # therefore we only add url, everything else should be in body in this type of request
-        proxy_req = request_factory.create_post '/register',
-                                                request.body.read,
-                                                headers(request).merge("Content-Type" => request.content_type),
-                                                { url: register_url(request) }
+        content_type = request.content_type
+        query = { url: register_url(request) }
+        build_req = -> { request_factory.create_post('/register', body, hdrs.merge("Content-Type" => content_type), query) }
       else
-        # the application/json request body contains the data - JSON as a string, query contains only the URL
-        proxy_req = request_factory.create_post '/register',
-                                                request.body.read,
-                                                headers(request),
-                                                request_params(request)
+        params = request_params(request)
+        build_req = -> { request_factory.create_post('/register', body, hdrs, params) }
       end
 
-      send_request(proxy_req)
+      retried = false
+      begin
+        send_request(build_req.call)
+      rescue *REGISTER_RETRY_EXCEPTIONS
+        raise if retried
+        retried = true
+        retry
+      end
     end
 
     private
