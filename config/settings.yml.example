@@ -42,6 +42,21 @@
 #:foreman_ssl_cert: ssl/certs/fqdn.pem
 #:foreman_ssl_key: ssl/private_keys/fqdn.pem
 
+# Timeout in seconds for HTTP requests from smart-proxy to Foreman (e.g. POST /register).
+# Defaults to 200s to stay above subscription-manager's default server_timeout of 180s,
+# ensuring the proxy never times out before the client does.
+#:foreman_request_timeout: 200
+
+# Timeout in seconds for establishing TCP/TLS connections from smart-proxy to Foreman.
+# Leave unset to use Ruby's default. Consider raising this if TLS handshakes (including
+# future post-quantum profiles) need more time.
+#:foreman_connect_timeout: 30
+
+# Seconds to keep idle outbound connections to Foreman alive for reuse.
+# Must be lower than the server-side KeepAliveTimeout (15s on RHEL).
+# Higher values reuse more TLS connections; lower values reduce stale socket risk.
+#:foreman_keep_alive_timeout: 10
+
 # host and ports configuration
 # an array of interfaces to bind ports to (possible values: *, localhost, 0.0.0.0)
 #:bind_host: ['*']
