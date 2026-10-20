@@ -7,6 +7,12 @@
 #:ssl_ca_file: ssl/certs/ca.pem
 #:ssl_private_key: ssl/private_keys/fqdn.key
 
+# Extra server leaves (beyond the primary above) for per-client algorithm selection,
+# e.g. an RSA leaf alongside a primary ML-DSA leaf. Optional per-entry 'ca' sets its chain.
+#:ssl_additional_certificates:
+#  - cert: ssl/certs/fqdn-rsa.pem
+#    key:  ssl/private_keys/fqdn-rsa.key
+
 # TLS cipher string passed directly to OpenSSL. Accepts any valid OpenSSL cipher
 # string. When unset, foreman-proxy auto-detects: 'PROFILE=SYSTEM' is used if
 # /etc/crypto-policies/back-ends/opensslcnf.config, otherwise 'HIGH' is used

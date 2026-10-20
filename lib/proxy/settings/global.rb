@@ -16,6 +16,7 @@ module ::Proxy::Settings
       :log_buffer_errors => 1000,
       :tls_ciphers => nil,
       :tls_min_version => nil,
+      :ssl_additional_certificates => [],
       :dns_resolv_timeouts => [5, 8, 13], # Ruby default is [5, 20, 40] which is a bit too much for us
     }
 

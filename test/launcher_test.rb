@@ -200,6 +200,33 @@ class LauncherWebrickSslTest < Test::Unit::TestCase
     OpenSSL::SSL::SSLContext.any_instance.expects(:ciphersuites=).never
     @launcher.webrick_server(@ssl_app, [], 8443)
   end
+
+  def test_webrick_server_adds_additional_certificates
+    cert, key = WEBrick::Utils.create_self_signed_cert(2048, [['CN', 'extra']], 'extra')
+    @ssl_app[:SSLAdditionalCertificates] = [[cert, key, nil]]
+    OpenSSL::SSL::SSLContext.any_instance.expects(:add_certificate).with(cert, key)
+    @launcher.webrick_server(@ssl_app, [], 8443)
+  end
+
+  def test_webrick_server_adds_additional_certificates_with_chain
+    cert, key = WEBrick::Utils.create_self_signed_cert(2048, [['CN', 'extra']], 'extra')
+    ca, = WEBrick::Utils.create_self_signed_cert(2048, [['CN', 'extra-ca']], 'extra-ca')
+    @ssl_app[:SSLAdditionalCertificates] = [[cert, key, [ca]]]
+    OpenSSL::SSL::SSLContext.any_instance.expects(:add_certificate).with(cert, key, ca)
+    @launcher.webrick_server(@ssl_app, [], 8443)
+  end
+
+  def test_webrick_server_skips_additional_certificates_when_absent
+    OpenSSL::SSL::SSLContext.any_instance.expects(:add_certificate).never
+    @launcher.webrick_server(@ssl_app, [], 8443)
+  end
+
+  def test_webrick_server_continues_when_additional_certificate_fails
+    cert, key = WEBrick::Utils.create_self_signed_cert(2048, [['CN', 'extra']], 'extra')
+    @ssl_app[:SSLAdditionalCertificates] = [[cert, key, nil]]
+    OpenSSL::SSL::SSLContext.any_instance.stubs(:add_certificate).raises(OpenSSL::SSL::SSLError.new('rejected'))
+    assert_nothing_raised { @launcher.webrick_server(@ssl_app, [], 8443) }
+  end
 end
 
 class LauncherSslCipherTest < Test::Unit::TestCase
@@ -222,5 +249,45 @@ class LauncherSslCipherTest < Test::Unit::TestCase
       launcher.webrick_server(app.merge(AccessLog: [Logger.new('/dev/null')]), ['localhost'], 0)
     end
     assert_match(/NOT_A_VALID_CIPHER_STRING!!!/, error.message)
+  end
+
+  def launcher_with_additional_certificates(entries)
+    settings = Proxy::Settings::Global.new(
+      ssl_private_key: File.join(SSL_FIXTURES, 'private_keys', 'server.example.com.pem'),
+      ssl_certificate: File.join(SSL_FIXTURES, 'certs', 'server.example.com.pem'),
+      ssl_ca_file:     File.join(SSL_FIXTURES, 'certs', 'ca.pem'),
+      ssl_additional_certificates: entries
+    )
+    Proxy::Launcher.new(settings)
+  end
+
+  def test_https_app_loads_additional_certificates
+    launcher = launcher_with_additional_certificates(
+      [{
+        cert: File.join(SSL_FIXTURES, 'certs', 'client.example.com.pem'),
+        key:  File.join(SSL_FIXTURES, 'private_keys', 'client.example.com.pem'),
+      }]
+    )
+    cert, key, chain = launcher.https_app(0, [])[:SSLAdditionalCertificates].first
+    assert_kind_of OpenSSL::X509::Certificate, cert
+    assert_kind_of OpenSSL::PKey::PKey, key
+    assert_nil chain
+  end
+
+  def test_https_app_loads_additional_certificate_chain_from_ca
+    launcher = launcher_with_additional_certificates(
+      [{
+        'cert' => File.join(SSL_FIXTURES, 'certs', 'client.example.com.pem'),
+        'key'  => File.join(SSL_FIXTURES, 'private_keys', 'client.example.com.pem'),
+        'ca'   => File.join(SSL_FIXTURES, 'certs', 'ca.pem'),
+      }]
+    )
+    _cert, _key, chain = launcher.https_app(0, [])[:SSLAdditionalCertificates].first
+    assert_kind_of Array, chain
+    assert_kind_of OpenSSL::X509::Certificate, chain.first
+  end
+
+  def test_https_app_defaults_additional_certificates_to_empty
+    assert_empty launcher_with_cipher(nil).https_app(0, [])[:SSLAdditionalCertificates]
   end
 end

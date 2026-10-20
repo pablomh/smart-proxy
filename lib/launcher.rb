@@ -90,6 +90,7 @@ module Proxy
         :SSLVerifyClient => OpenSSL::SSL::VERIFY_PEER,
         :SSLPrivateKey => load_ssl_private_key(settings.ssl_private_key),
         :SSLCertificate => load_ssl_certificate(settings.ssl_certificate),
+        :SSLAdditionalCertificates => load_additional_certificates(settings.ssl_additional_certificates),
         :SSLCACertificateFile => settings.ssl_ca_file,
         :SSLOptions => build_ssl_options,
         :SSLCiphers => cipher_list,
@@ -192,6 +193,14 @@ module Proxy
       raise e
     end
 
+    def load_additional_certificates(entries)
+      Array(entries).map do |entry|
+        entry = entry.transform_keys(&:to_sym)
+        chain = entry[:ca] && [load_ssl_certificate(entry[:ca])]
+        [load_ssl_certificate(entry[:cert]), load_ssl_private_key(entry[:key]), chain]
+      end
+    end
+
     def webrick_server(app, addresses, port)
       server = ::WEBrick::HTTPServer.new(app)
       begin
@@ -210,9 +219,27 @@ module Proxy
       if app[:SSLEnable]
         server.ssl_context.min_version = app[:SSLMinVersion] if app[:SSLMinVersion]
         server.ssl_context.ciphersuites = app[:SSLCiphersuites] if app[:SSLCiphersuites]
+        add_additional_certificates(server.ssl_context, app[:SSLAdditionalCertificates])
       end
 
       server
+    end
+
+    # A leaf the local OpenSSL rejects is skipped so the others keep serving.
+    def add_additional_certificates(ssl_context, certificates)
+      return if certificates.nil? || certificates.empty?
+
+      unless ssl_context.respond_to?(:add_certificate)
+        logger.warn "ssl_additional_certificates is configured but this Ruby/OpenSSL build " \
+                    "does not support SSLContext#add_certificate. Only the primary certificate will be served."
+        return
+      end
+
+      certificates.each do |cert, key, chain|
+        ssl_context.add_certificate(cert, key, *(chain || []))
+      rescue Exception => e
+        logger.warn "Unable to add additional SSL certificate #{cert.subject}, skipping it.", e
+      end
     end
 
     def launch
